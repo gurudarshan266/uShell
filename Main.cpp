@@ -19,6 +19,8 @@ extern "C" {
 #endif
 
 void HandleExecutable(Cmd&);
+void HandleSetEnv(Cmd&);
+void HandleUnsetEnv(Cmd&);
 
 void prCmd(Cmd c)
 {
@@ -60,11 +62,17 @@ void prCmd(Cmd c)
       printf("\b]");
     }
     putchar('\n');
-    // this driver understands one command
+
+
+
     if ( !strcmp(c->args[0], "end") )
       exit(0);
-
-    HandleExecutable(c);
+    else if(strcmp(c->args[0],"setenv")==0)
+    	HandleSetEnv(c);
+    else if(strcmp(c->args[0],"unsetenv")==0)
+		HandleUnsetEnv(c);
+    else
+    	HandleExecutable(c);
   }
 }
 
@@ -85,6 +93,39 @@ void prPipe(Pipe p)
   prPipe(p->next);
 }
 
+void HandleSetEnv(Cmd& c)
+{
+	//No arguments so display the list
+	if(c->nargs==1)
+	{
+		char** list = environ;
+		for(int i=0; list[i]!=NULL; i++)
+		{
+			cout<<list[i]<<endl;
+		}
+	}
+	//No value, so set it to ""
+	else if(c->nargs==2)
+	{
+		setenv(c->args[1],"",1);
+	}
+	else
+	{
+		setenv(c->args[1],c->args[2],1);
+	}
+
+}
+
+void HandleUnsetEnv(Cmd& c)
+{
+	if(c->nargs < 2)
+		cout<<"unsetenv: variable name missing"<<endl;
+	else
+	{
+		int res = unsetenv(c->args[1]);
+	}
+}
+
 /*
  * Look in absolute or relative path for the executable
  * If not found, search in PATH for the executable
@@ -99,10 +140,12 @@ void HandleExecutable(Cmd& c)
 	{
 		int res = execvp(c->args[0],c->args);
 		cout<<c->args[0]<<": command not found"<<endl;
+		exit(0);
 	}
 	else
 	{
 		waitpid(cpid, &retStat, 0);
+		cout<<"Child process terminated"<<endl;
 	}
 
 }
@@ -110,7 +153,7 @@ void HandleExecutable(Cmd& c)
 int main(int argc, char *argv[])
 {
   Pipe p;
-  const char *host = "armadillo";
+  const char *host = getenv("USER");
 
   while ( 1 ) {
     printf("%s%% ", host);
