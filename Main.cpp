@@ -21,6 +21,8 @@ extern "C" {
 void HandleExecutable(Cmd&);
 void HandleSetEnv(Cmd&);
 void HandleUnsetEnv(Cmd&);
+void HandleLogout(Cmd&);
+void HandleCd(Cmd&);
 
 void prCmd(Cmd c)
 {
@@ -67,10 +69,14 @@ void prCmd(Cmd c)
 
     if ( !strcmp(c->args[0], "end") )
       exit(0);
-    else if(strcmp(c->args[0],"setenv")==0)
+    else if(strcmp(c->args[0],"logout")==0)
+		HandleLogout(c);
+	else if(strcmp(c->args[0],"setenv")==0)
     	HandleSetEnv(c);
     else if(strcmp(c->args[0],"unsetenv")==0)
 		HandleUnsetEnv(c);
+    else if(strcmp(c->args[0],"cd")==0)
+		HandleCd(c);
     else
     	HandleExecutable(c);
   }
@@ -126,13 +132,30 @@ void HandleUnsetEnv(Cmd& c)
 	}
 }
 
+void HandleLogout(Cmd& c)
+{
+	exit(0);
+}
+
+void HandleCd(Cmd& c)
+{
+	if(c->nargs == 1)
+	{
+		chdir("~");
+	}
+	else
+	{
+		chdir(c->args[2]);
+	}
+}
+
 /*
  * Look in absolute or relative path for the executable
  * If not found, search in PATH for the executable
  */
 void HandleExecutable(Cmd& c)
 {
-	int retStat;
+	int retStat=0;
 	pid_t cpid = fork();
 
 	// Child
