@@ -1,4 +1,5 @@
 #include <iostream>
+#include <vector>
 
 using namespace std;
 
@@ -28,15 +29,15 @@ extern "C" {
 #define ANSI_COLOR_CYAN    "\x1b[36m"
 #define ANSI_COLOR_RESET   "\x1b[0m"
 
-void HandleExecutable(Cmd&);
-void HandleSetEnv(Cmd&);
-void HandleUnsetEnv(Cmd&);
-void HandleLogout(Cmd&);
-void HandleCd(Cmd&);
+void HandleExecutable(Cmd c,int*,int*);
+void HandleSetEnv(Cmd);
+void HandleUnsetEnv(Cmd);
+void HandleLogout(Cmd);
+void HandleCd(Cmd);
 
-void ManageIO(Cmd&);
-void ManagePipedCmd(Cmd&,int*,int*);
-
+void ManageIO(Cmd);
+void ManagePipedCmd(Cmd,int*,int*);
+void ManagePipe(Pipe& p);
 
 void prCmd(Cmd c)
 {
@@ -90,8 +91,9 @@ void prCmd(Cmd c)
 		HandleUnsetEnv(c);
     else if(strcmp(c->args[0],"cd")==0)
 		HandleCd(c);
-    else
-    	HandleExecutable(c);
+    else{
+//    	HandleExecutable(c, NULL, 0);
+    }
   }
 }
 
@@ -112,7 +114,7 @@ void prPipe(Pipe p)
   prPipe(p->next);
 }
 
-void HandleSetEnv(Cmd& c)
+void HandleSetEnv(Cmd c)
 {
 	//No arguments so display the list
 	if(c->nargs==1)
@@ -135,7 +137,7 @@ void HandleSetEnv(Cmd& c)
 
 }
 
-void HandleUnsetEnv(Cmd& c)
+void HandleUnsetEnv(Cmd c)
 {
 	if(c->nargs < 2)
 		cout<<"unsetenv: variable name missing"<<endl;
@@ -145,12 +147,12 @@ void HandleUnsetEnv(Cmd& c)
 	}
 }
 
-void HandleLogout(Cmd& c)
+void HandleLogout(Cmd c)
 {
 	exit(0);
 }
 
-void HandleCd(Cmd& c)
+void HandleCd(Cmd c)
 {
 	int res;
 
@@ -167,7 +169,7 @@ void HandleCd(Cmd& c)
 }
 
 
-void ManageIO(Cmd& c)
+void ManageIO(Cmd c)
 {
 	int fd[2];
 
@@ -207,10 +209,9 @@ void ManageIO(Cmd& c)
 	}
 }
 
-void ManagePipedCmd(Cmd& c, int* prevPipe, int* nextPipe)
+void ManagePipedCmd(Cmd c, int* prevPipe, int* nextPipe)
 {
-	ManageIO(c);
-
+	//Setup pipes
 	if(c->in == Tpipe)
 	{
 		close(prevPipe[OUT]);
@@ -219,8 +220,44 @@ void ManagePipedCmd(Cmd& c, int* prevPipe, int* nextPipe)
 
 	if(c->out == Tpipe || c->out == TpipeErr)
 	{
+		close(nextPipe[IN]);
+		dup2(nextPipe[OUT],OUT);
+
+		if(c->out == TpipeErr)
+			dup2(nextPipe[OUT],ERR);
+	}
+
+	//Setup IO redirection
+	ManageIO(c);
+
+
+}
+
+void ManagePipe(Pipe& p)
+{
+	int pipeFd[10][2];
+
+	int index=1;
+
+	for (Cmd c = p->head; c != NULL; c = c->next )
+	{
+		pipe(pipeFd[index]);//Next pipe
+
+		HandleExecutable(c, pipeFd[index-1], pipeFd[index]);
+
+		//Highly essential to send EOF
+		if(index>1)
+		{
+			close(pipeFd[index-1][0]);
+			close(pipeFd[index-1][1]);
+		}
+
+		index++;
 
 	}
+
+	wait(NULL);
+
 
 }
 
@@ -228,7 +265,7 @@ void ManagePipedCmd(Cmd& c, int* prevPipe, int* nextPipe)
  * Look in absolute or relative path for the executable
  * If not found, search in PATH for the executable
  */
-void HandleExecutable(Cmd& c)
+void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe)
 {
 	int retStat=0;
 	pid_t cpid = fork();
@@ -236,7 +273,7 @@ void HandleExecutable(Cmd& c)
 	// Child
 	if(cpid == 0)
 	{
-		ManageIO(c);
+		ManagePipedCmd(c, prevPipe, nextPipe);
 
 		int res = execvp(c->args[0],c->args);
 		cout<<c->args[0]<<": command not found"<<endl;
@@ -244,8 +281,8 @@ void HandleExecutable(Cmd& c)
 	}
 	else
 	{
-		waitpid(cpid, &retStat, 0);
-		cout<<"Child process terminated"<<endl;
+//		waitpid(cpid, &retStat, 0);
+//		cout<<"Child process terminated"<<endl;
 	}
 
 }
@@ -261,7 +298,9 @@ int main(int argc, char *argv[])
 	getcwd(cwd, sizeof(cwd));
 	printf("%s: "ANSI_COLOR_CYAN"%s "ANSI_COLOR_RESET"%% ", host, cwd);
 	p = parse();
-	prPipe(p);
+
+	if(p) ManagePipe(p);
+//	prPipe(p);
 	freePipe(p);
   }
 }
