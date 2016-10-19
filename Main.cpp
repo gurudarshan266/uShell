@@ -11,6 +11,7 @@ extern "C" {
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <errno.h>
 #include <unistd.h>
 #include "parse.h"
 
@@ -128,7 +129,7 @@ void HandleUnsetEnv(Cmd& c)
 		cout<<"unsetenv: variable name missing"<<endl;
 	else
 	{
-		int res = unsetenv(c->args[1]);
+		unsetenv(c->args[1]);
 	}
 }
 
@@ -139,14 +140,18 @@ void HandleLogout(Cmd& c)
 
 void HandleCd(Cmd& c)
 {
+	int res;
+
 	if(c->nargs == 1)
 	{
-		chdir("~");
+		res=chdir(getenv("HOME"));
 	}
 	else
 	{
-		chdir(c->args[2]);
+		res=chdir(c->args[1]);
 	}
+	if(res<0)
+		cout<<strerror(errno)<<endl;
 }
 
 /*
@@ -161,7 +166,7 @@ void HandleExecutable(Cmd& c)
 	// Child
 	if(cpid == 0)
 	{
-		int res = execvp(c->args[0],c->args);
+		execvp(c->args[0],c->args);
 		cout<<c->args[0]<<": command not found"<<endl;
 		exit(0);
 	}
