@@ -36,8 +36,8 @@ void HandleLogout(Cmd);
 void HandleCd(Cmd);
 
 void ManageIO(Cmd);
-void ManagePipedCmd(Cmd,int*,int*);
-void ManagePipe(Pipe& p);
+void SetupPipes(Cmd,int*,int*);
+void ManageCmdSeq(Pipe& p);
 
 void prCmd(Cmd c)
 {
@@ -209,13 +209,14 @@ void ManageIO(Cmd c)
 	}
 }
 
-void ManagePipedCmd(Cmd c, int* prevPipe, int* nextPipe)
+void SetupPipes(Cmd c, int* prevPipe, int* nextPipe)
 {
 	//Setup pipes
 	if(c->in == Tpipe)
 	{
 		close(prevPipe[OUT]);
 		dup2(prevPipe[IN],IN);
+		close(prevPipe[IN]);
 	}
 
 	if(c->out == Tpipe || c->out == TpipeErr)
@@ -225,6 +226,8 @@ void ManagePipedCmd(Cmd c, int* prevPipe, int* nextPipe)
 
 		if(c->out == TpipeErr)
 			dup2(nextPipe[OUT],ERR);
+
+		close(nextPipe[OUT]);
 	}
 
 	//Setup IO redirection
@@ -233,15 +236,16 @@ void ManagePipedCmd(Cmd c, int* prevPipe, int* nextPipe)
 
 }
 
-void ManagePipe(Pipe& p)
+void ManageCmdSeq(Pipe& p)
 {
-	int pipeFd[10][2];
+	int pipeFd[1024][2];
 
 	int index=1;
 
 	for (Cmd c = p->head; c != NULL; c = c->next )
 	{
-		pipe(pipeFd[index]);//Next pipe
+		if(c->out == Tpipe || c->out == TpipeErr)
+			pipe(pipeFd[index]);//Next pipe
 
 		HandleExecutable(c, pipeFd[index-1], pipeFd[index]);
 
@@ -256,7 +260,8 @@ void ManagePipe(Pipe& p)
 
 	}
 
-	wait(NULL);
+
+	while(wait(NULL)!=-1);
 
 
 }
@@ -273,11 +278,11 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe)
 	// Child
 	if(cpid == 0)
 	{
-		ManagePipedCmd(c, prevPipe, nextPipe);
+		SetupPipes(c, prevPipe, nextPipe);
 
 		int res = execvp(c->args[0],c->args);
 		cout<<c->args[0]<<": command not found"<<endl;
-		exit(0);
+		exit(-1);
 	}
 	else
 	{
@@ -299,7 +304,7 @@ int main(int argc, char *argv[])
 	printf("%s: "ANSI_COLOR_CYAN"%s "ANSI_COLOR_RESET"%% ", host, cwd);
 	p = parse();
 
-	if(p) ManagePipe(p);
+	if(p) ManageCmdSeq(p);
 //	prPipe(p);
 	freePipe(p);
   }
