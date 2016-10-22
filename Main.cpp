@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <map>
 #include "Job.h"
 
 using namespace std;
@@ -44,8 +45,8 @@ void RestoreShellState();
 void AttachShell2PG(pid_t);
 
 Job* ForegroundJob;
-vector<Job*> BackgroundJobs;
-vector<Job*> SuspendedJobs;
+map<int,Job*> BackgroundJobs;
+map<int,Job*> SuspendedJobs;
 
 pid_t origPgid;
 
@@ -246,15 +247,29 @@ void SetupPipes(Cmd c, int* prevPipe, int* nextPipe)
 
 }
 
+bool IsBgCmd(Pipe p)
+{
+	Cmd c = p->head;
+
+	while(c!=NULL)
+	{
+		if(c->exec == Tamp)
+			return true;
+		c=c->next;
+	}
+}
+
 void ManageCmdSeq(Pipe& p)
 {
 	int pipeFd[1024][2];
 
-	Job* job = new Job(Background);
-
 	int index=1;
 
 	pid_t master_pid = 0;
+
+	bool isBg = IsBgCmd(p);
+
+	Job* job = new Job( (isBg) ? Background : Foreground );
 
 	for (Cmd c = p->head; c != NULL; c = c->next )
 	{
@@ -274,35 +289,40 @@ void ManageCmdSeq(Pipe& p)
 		}
 
 		index++;
-
-	}
+	}//for
 
 	job->DumpJobStr();
 
-	ForegroundJob = job;
-	cout<<"STDIN currently owned by "<<tcgetpgrp(0)<<endl;
-
-	AttachShell2PG(job->GetPgid());
-
-	int retStat=0;
-	pid_t pp = 1;
-	while(pp > 0)
+	if(!isBg)
 	{
-		pp = waitpid(-getpgrp(),&retStat, WUNTRACED);
-		cout<<"PID = "<<pp<<" Status = "<<retStat<<endl;
+		ForegroundJob = job;
+		cout << "STDIN currently owned by " << tcgetpgrp(0) << endl;
+		AttachShell2PG(job->GetPgid());
 
-		if(WIFSTOPPED(retStat))
-		{
-			cout<<" Stopped by signal "<<WSTOPSIG(retStat)<<endl;
-			break;
+		int retStat = 0;
+		pid_t pp = 1;
+		while (pp > 0) {
+			//Wait on the PG
+			pp = waitpid(-getpgrp(), &retStat, WUNTRACED);
+			cout << "PID = " << pp << " Status = " << retStat << endl;
+
+			//Even if one process in the group is sent to sleep. Assume that all of them have been sent to sleep
+			if (WIFSTOPPED(retStat)) {
+				cout << " Stopped by signal " << WSTOPSIG(retStat) << endl;
+				break;
+			}
 		}
+
+		//	while(wait(NULL)!=-1);
+
+		ForegroundJob = NULL;
+
+		RestoreShellState();
+	}//if(!isBg)
+	else
+	{
+		BackgroundJobs[job->GetJobID()] = job;
 	}
-
-//	while(wait(NULL)!=-1);
-
-	ForegroundJob = NULL;
-
-	RestoreShellState();
 
 }
 
@@ -385,6 +405,10 @@ void sigtstp_handler(int signo)
   if(ForegroundJob)
   {
 	  cout<<"["<<ForegroundJob->GetJobID()<<"] Stopped"<<endl;
+
+	  ForegroundJob->state = Stopped;
+
+	  SuspendedJobs[ForegroundJob->GetJobID()] = ForegroundJob;
   }
 }
 

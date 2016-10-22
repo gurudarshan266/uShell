@@ -39,6 +39,8 @@ void Job::DumpJobStr()
 	}
 
 	cout<<"\tPGID="<<getpgid(mProcesses[0]);
+	if(state == Background)
+		cout<<" &";
 	cout<<endl;
 }
 
