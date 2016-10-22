@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include "Job.h"
 
 using namespace std;
 
@@ -15,6 +16,7 @@ extern "C" {
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <signal.h>
 #include "parse.h"
 
 #ifdef __cplusplus
@@ -29,7 +31,7 @@ extern "C" {
 #define ANSI_COLOR_CYAN    "\x1b[36m"
 #define ANSI_COLOR_RESET   "\x1b[0m"
 
-void HandleExecutable(Cmd c,int*,int*);
+void HandleExecutable(Cmd c,int*,int*,Job*,pid_t&);
 void HandleSetEnv(Cmd);
 void HandleUnsetEnv(Cmd);
 void HandleLogout(Cmd);
@@ -38,6 +40,14 @@ void HandleCd(Cmd);
 void ManageIO(Cmd);
 void SetupPipes(Cmd,int*,int*);
 void ManageCmdSeq(Pipe& p);
+void RestoreShellState();
+void AttachShell2PG(pid_t);
+
+Job* ForegroundJob;
+vector<Job*> BackgroundJobs;
+vector<Job*> SuspendedJobs;
+
+pid_t origPgid;
 
 void prCmd(Cmd c)
 {
@@ -212,7 +222,7 @@ void ManageIO(Cmd c)
 void SetupPipes(Cmd c, int* prevPipe, int* nextPipe)
 {
 	//Setup pipes
-	if(c->in == Tpipe)
+	if(c->in == Tpipe || c->in == TpipeErr)
 	{
 		close(prevPipe[OUT]);
 		dup2(prevPipe[IN],IN);
@@ -240,14 +250,21 @@ void ManageCmdSeq(Pipe& p)
 {
 	int pipeFd[1024][2];
 
+	Job* job = new Job(Background);
+
 	int index=1;
+
+	pid_t master_pid = 0;
 
 	for (Cmd c = p->head; c != NULL; c = c->next )
 	{
+		if(strcmp(c->args[0],"end")==0)
+			exit(0);
+
 		if(c->out == Tpipe || c->out == TpipeErr)
 			pipe(pipeFd[index]);//Next pipe
 
-		HandleExecutable(c, pipeFd[index-1], pipeFd[index]);
+		HandleExecutable(c, pipeFd[index-1], pipeFd[index], job, master_pid);
 
 		//Highly essential to send EOF
 		if(index>1)
@@ -260,9 +277,32 @@ void ManageCmdSeq(Pipe& p)
 
 	}
 
+	job->DumpJobStr();
 
-	while(wait(NULL)!=-1);
+	ForegroundJob = job;
+	cout<<"STDIN currently owned by "<<tcgetpgrp(0)<<endl;
 
+	AttachShell2PG(job->GetPgid());
+
+	int retStat=0;
+	pid_t pp = 1;
+	while(pp > 0)
+	{
+		pp = waitpid(-getpgrp(),&retStat, WUNTRACED);
+		cout<<"PID = "<<pp<<" Status = "<<retStat<<endl;
+
+		if(WIFSTOPPED(retStat))
+		{
+			cout<<" Stopped by signal "<<WSTOPSIG(retStat)<<endl;
+			break;
+		}
+	}
+
+//	while(wait(NULL)!=-1);
+
+	ForegroundJob = NULL;
+
+	RestoreShellState();
 
 }
 
@@ -270,9 +310,9 @@ void ManageCmdSeq(Pipe& p)
  * Look in absolute or relative path for the executable
  * If not found, search in PATH for the executable
  */
-void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe)
+void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master)
 {
-	int retStat=0;
+
 	pid_t cpid = fork();
 
 	// Child
@@ -280,16 +320,113 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe)
 	{
 		SetupPipes(c, prevPipe, nextPipe);
 
+		signal(SIGINT, SIG_DFL);
+		signal(SIGTSTP,SIG_DFL);
+
+		if(master==0)//No master yet
+		{
+			master = getpid();
+			if(getpgrp()==origPgid)
+				setpgid(0,0);//Current process and PGID=PID
+		}
+
+		setpgid(0,master);//Current process and PGID = master
+
 		int res = execvp(c->args[0],c->args);
 		cout<<c->args[0]<<": command not found"<<endl;
 		exit(-1);
 	}
+	//parent
 	else
 	{
-//		waitpid(cpid, &retStat, 0);
-//		cout<<"Child process terminated"<<endl;
+
+		//Add it to list processes in the job
+		if(cpid>0)
+		{
+			//If no master has not been assigned yet (need to be executed only once)
+			if(master==0)
+			{
+				//Already set just need to copy the value to master
+				if(cpid == getpgrp())
+				{
+					cout<<"Already set just need to copy the value to master"<<endl;
+					master = cpid;
+				}
+				//set the master and the tid
+				else if(origPgid == getpgid(cpid))
+				{
+					cout<<"Already set just need to copy the value to master"<<endl;
+					setpgid(cpid,0);
+					master = getpgid(cpid);
+				}
+			}
+			job->AddProcess(cpid);
+		}
 	}
 
+}
+
+void sigint_handler(int signo)
+{
+  if (signo == SIGINT)
+    printf("\nReceived SIGINT\n");
+
+  if(ForegroundJob)
+  {
+	  cout<<"["<<ForegroundJob->GetJobID()<<"] Terminated"<<endl;
+  }
+}
+
+void sigtstp_handler(int signo)
+{
+  if (signo == SIGTSTP)
+    printf("\nReceived SIGTSTP\n");
+
+  if(ForegroundJob)
+  {
+	  cout<<"["<<ForegroundJob->GetJobID()<<"] Stopped"<<endl;
+  }
+}
+
+void sigttin_handler(int signo)
+{
+    printf("Ignoring SIGTTIN\n");
+
+}
+
+void RegisterSigHandlers()
+{
+	if (signal(SIGINT, sigint_handler) == SIG_ERR)
+		printf("\ncan't catch SIGINT\n");
+
+
+	signal(SIGTTOU, SIG_IGN);
+
+
+	if (signal(SIGTSTP, sigtstp_handler) == SIG_ERR)
+			printf("\ncan't catch SIGINT\n");
+
+//	signal(SIGTSTP,SIG_IGN);
+}
+
+void RestoreShellState()
+{
+	if(setpgid(0, origPgid)>=0)
+	{
+		tcsetpgrp(STDIN_FILENO, getpgrp());
+		cout<<"Shell state restored";
+		cout<<"\tPGID = "<<getpgrp()<<endl;
+	}
+}
+
+void AttachShell2PG(pid_t pgid)
+{
+	if(setpgid(0, pgid)>=0)
+	{
+		tcsetpgrp(STDIN_FILENO, getpgrp());
+		cout<<"Shell attached to ";
+		cout<<"\tPGID = "<<getpgrp()<<endl;
+	}
 }
 
 int main(int argc, char *argv[])
@@ -297,13 +434,16 @@ int main(int argc, char *argv[])
   Pipe p;
   const char *host = getenv("USER");
 
+  RegisterSigHandlers();
+
   char cwd[1024] = "";
+
+  origPgid = getpgrp();
 
   while ( 1 ) {
 	getcwd(cwd, sizeof(cwd));
 	printf("%s: "ANSI_COLOR_CYAN"%s "ANSI_COLOR_RESET"%% ", host, cwd);
 	p = parse();
-
 	if(p) ManageCmdSeq(p);
 //	prPipe(p);
 	freePipe(p);
