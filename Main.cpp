@@ -47,6 +47,8 @@ void DetachTerminal();
 void AttachTerminal(pid_t);
 void AssignPg(pid_t pid, pid_t& master);
 void DumpJobs();
+void DumpJob(Job* j, ostream& os);
+Job* BringToFg(int jobId);
 
 Job* ForegroundJob;
 map<int,Job*> BackgroundJobs;
@@ -286,6 +288,62 @@ bool ExecuteBuiltIn(Cmd c)
     return true;
 }
 
+void WaitOnFg()
+{
+	pid_t pp = 1;
+	int retStat=0;
+
+	while (pp > 0)
+	{
+		pp = waitpid(-1, &retStat, WUNTRACED);
+
+		if(pp<0) break;
+
+		Job* j = sPid2Job[pp];
+		if(WIFEXITED(retStat)|| WIFSIGNALED(retStat))
+		{
+			j->UpdateProcState(pp, Dead);
+
+			clog<<"EXITED PID = "<<pp<<" JobID = "<<j->GetJobID()<<" status = "<<retStat<<endl;
+
+			State state = j->state;
+
+			if(j->IsTerminated())
+			{
+				if(state==Background)
+				{
+					cout<<"Background ";
+					cout<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
+				}
+//					cout<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
+				j->state = Terminated;
+
+				if(j==ForegroundJob)
+					break;
+
+				if(j!=ForegroundJob && j!=NULL)
+					delete j;
+			}
+		}
+
+		//Even if one process in the group is sent to sleep. Assume that all of them have been sent to sleep
+		else if (WIFSTOPPED(retStat))
+		{
+			j->UpdateProcState(pp, Sleeping);
+			if(ForegroundJob->IsSuspended())
+			{
+				ForegroundJob->state = Stopped;
+				SuspendedJobs[ForegroundJob->GetJobID()] = ForegroundJob;
+				cout<<"Job["<<ForegroundJob->GetJobID()<<"]\tSuspended"<<endl;
+				break;
+			}
+			clog<< " Stopped by signal " << WSTOPSIG(retStat) << endl;
+		}
+	}
+}
+
+
+
 void ManageCmdSeq(Pipe& p)
 {
 	int pipeFd[1024][2];
@@ -296,9 +354,26 @@ void ManageCmdSeq(Pipe& p)
 
 	bool isBackgroundProc = IsBgCmd(p);
 
-	Job* job = new Job( (isBackgroundProc) ? Background : Foreground , p);
+	bool isJobCtrlCmd = false;
 
-	for (Cmd c = p->head; c != NULL; c = c->next )
+	Job* job;
+
+	//For "fg" command
+	if(strcmp(p->head->args[0],"fg")==0)
+	{
+		isJobCtrlCmd = true;
+		int jobId;
+		sscanf(p->head->args[1],"%%%d",&jobId);
+		job = BringToFg(jobId);
+		if(!job) return;
+	}
+	else
+	{
+		job = new Job( (isBackgroundProc) ? Background : Foreground , p);
+	}
+
+
+	for (Cmd c = p->head; c != NULL && !isJobCtrlCmd; c = c->next )
 	{
 		if(strcmp(c->args[0],"end")==0 || strcmp(c->args[0],"logout")==0 )
 			exit(0);
@@ -318,7 +393,10 @@ void ManageCmdSeq(Pipe& p)
 		index++;
 	}//for
 
-//	job->DumpJobStr();
+	if(job->state==Background)
+		DumpJob(job,cout);
+	else
+		DumpJob(job,clog);
 
 	if(!isBackgroundProc)
 	{
@@ -328,48 +406,8 @@ void ManageCmdSeq(Pipe& p)
 
 		int retStat = 0;
 		pid_t pp = 1;
-		while (pp > 0) {
-			//Wait on the PG
-			pp = waitpid(-1, &retStat, WUNTRACED);
 
-			if(pp<0) break;
-
-			if(WIFEXITED(retStat)|| WIFSIGNALED(retStat))
-			{
-				Job* j = sPid2Job[pp];
-				j->UpdateProcState(pp, Dead);
-
-				clog<<"EXITED PID = "<<pp<<" JobID = "<<j->GetJobID()<<" status = "<<retStat<<endl;
-
-				State state = j->state;
-
-				if(j->IsTerminated())
-				{
-					if(state==Background)
-					{
-						cout<<"Background ";
-						cout<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
-					}
-//					cout<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
-					j->state = Terminated;
-
-					if(j==ForegroundJob)
-						break;
-
-					if(j!=ForegroundJob && j!=NULL)
-						delete j;
-				}
-			}
-
-			//Even if one process in the group is sent to sleep. Assume that all of them have been sent to sleep
-			if (WIFSTOPPED(retStat)) {
-				ForegroundJob->state = Stopped;
-				SuspendedJobs[ForegroundJob->GetJobID()] = ForegroundJob;
-				cout<<"Job["<<ForegroundJob->GetJobID()<<"]\tSuspended"<<endl;
-				clog<< " Stopped by signal " << WSTOPSIG(retStat) << endl;
-				break;
-			}
-		}
+		WaitOnFg();
 
 		//	while(wait(NULL)!=-1);
 
@@ -381,6 +419,41 @@ void ManageCmdSeq(Pipe& p)
 	{
 		BackgroundJobs[job->GetJobID()] = job;
 	}
+
+}
+
+Job* BringToFg(int jobId)
+{
+	//If it's a Background process
+	if(BackgroundJobs.find(jobId) != BackgroundJobs.end())
+	{
+		Job* j = BackgroundJobs[jobId];
+		BackgroundJobs.erase(jobId);
+
+		//Race condition during clean up. Avoiding terminated cases which aren't yet cleaned up
+		if(j->state == Background)
+		{
+			j->state = Foreground;
+			ForegroundJob = j;
+			return ForegroundJob;
+/*			clog << "STDIN currently owned by " << tcgetpgrp(0) << endl;
+			AttachTerminal(job->GetPgid());
+
+			int retStat = 0;
+			pid_t pp = 1;
+
+			WaitOnFg();
+
+			//	while(wait(NULL)!=-1);
+
+			ForegroundJob = NULL;
+
+			DetachTerminal();*/
+		}
+
+	}
+
+	return NULL;
 
 }
 
@@ -493,7 +566,6 @@ void sigtstp_handler(int signo)
 void sigttin_handler(int signo)
 {
     printf("Ignoring SIGTTIN\n");
-
 }
 
 void RegisterSigHandlers()
@@ -501,14 +573,12 @@ void RegisterSigHandlers()
 	if (signal(SIGINT, sigint_handler) == SIG_ERR)
 		printf("\ncan't catch SIGINT\n");
 
-
-	signal(SIGTTOU, SIG_IGN);
-
-
 	if (signal(SIGTSTP, sigtstp_handler) == SIG_ERR)
 			printf("\ncan't catch SIGINT\n");
 
-//	signal(SIGTSTP,SIG_IGN);
+	signal(SIGTTOU, SIG_IGN);
+	signal(SIGTSTP,SIG_IGN);
+	signal(SIGINT,SIG_IGN);
 }
 
 void DetachTerminal()
@@ -577,7 +647,7 @@ void DumpJobs()
 	for (map<int,Job*>::iterator it=BackgroundJobs.begin(); it!=BackgroundJobs.end(); ++it)
 	{
 		Job* j = it->second;
-		if(j && j->state!=Terminated)
+		if(j && j->state!=Terminated && j->state!=Foreground)
 		{
 			DumpJob(j,cout);
 		}
@@ -586,7 +656,7 @@ void DumpJobs()
 	for (map<int,Job*>::iterator it=SuspendedJobs.begin(); it!=SuspendedJobs.end(); ++it)
 	{
 		Job* j = it->second;
-		if(j)
+		if(j && j->state!=Terminated && j->state!=Foreground)
 		{
 			DumpJob(j,cout);
 		}

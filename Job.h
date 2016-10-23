@@ -45,6 +45,7 @@ public:
 
 	bool UpdateProcState(pid_t pid, ProcState state);
 	bool IsTerminated();
+	bool IsSuspended();
 
 	State state;
 	std::ostringstream mCmdStr;

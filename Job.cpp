@@ -144,6 +144,20 @@ bool Job::IsTerminated()
 	return true;
 }
 
+bool Job::IsSuspended()
+{
+	for(int i=0;i<mProcessesState.size();i++)
+	{
+		if(mProcessesState[i]!=Sleeping)
+		{
+			return false;
+		}
+	}
+
+	state = Stopped;
+	return true;
+}
+
 Job::~Job()
 {
 	map<pid_t,Job*>::iterator it;
@@ -156,8 +170,11 @@ Job::~Job()
 		sPid2Job.erase(mProcesses[i]);
 	}
 
-	if(state==Background)
+	if(state==Background && BackgroundJobs.find(mJobId)!=BackgroundJobs.end())
+	{
 		BackgroundJobs.erase(mJobId);
+	}
+
 
 
 //	if(mJobId == num_jobs-1) num_jobs--;
