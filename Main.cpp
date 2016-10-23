@@ -3,6 +3,7 @@
 #include <map>
 #include "Job.h"
 #include <string>
+#include <sstream>
 
 using namespace std;
 
@@ -45,6 +46,7 @@ void ManageCmdSeq(Pipe& p);
 void DetachTerminal();
 void AttachTerminal(pid_t);
 void AssignPg(pid_t pid, pid_t& master);
+void DumpJobs();
 
 Job* ForegroundJob;
 map<int,Job*> BackgroundJobs;
@@ -316,7 +318,7 @@ void ManageCmdSeq(Pipe& p)
 		index++;
 	}//for
 
-	job->DumpJobStr();
+//	job->DumpJobStr();
 
 	if(!isBackgroundProc)
 	{
@@ -343,17 +345,27 @@ void ManageCmdSeq(Pipe& p)
 
 				if(j->IsTerminated())
 				{
-					if(state==Background) cout<<"Background ";
-					cout<<"Job["<<j->GetJobID()<<"] has Terminated"<<endl;
+					if(state==Background)
+					{
+						cout<<"Background ";
+						cout<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
+					}
+//					cout<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
+					j->state = Terminated;
 
 					if(j==ForegroundJob)
 						break;
-					if(j!=ForegroundJob && j!=NULL) delete j;
+
+					if(j!=ForegroundJob && j!=NULL)
+						delete j;
 				}
 			}
 
 			//Even if one process in the group is sent to sleep. Assume that all of them have been sent to sleep
 			if (WIFSTOPPED(retStat)) {
+				ForegroundJob->state = Stopped;
+				SuspendedJobs[ForegroundJob->GetJobID()] = ForegroundJob;
+				cout<<"Job["<<ForegroundJob->GetJobID()<<"]\tSuspended"<<endl;
 				clog<< " Stopped by signal " << WSTOPSIG(retStat) << endl;
 				break;
 			}
@@ -361,7 +373,6 @@ void ManageCmdSeq(Pipe& p)
 
 		//	while(wait(NULL)!=-1);
 
-		delete ForegroundJob;
 		ForegroundJob = NULL;
 
 		DetachTerminal();
@@ -389,6 +400,7 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master
 
 		signal(SIGINT, SIG_DFL);
 		signal(SIGTSTP,SIG_DFL);
+		signal(SIGTTOU,SIG_DFL);
 
 		AssignPg(getpid(),master);
 
@@ -400,6 +412,10 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master
 	    {
 	    	strcpy(c->args[0],"which");
 	    	execvp(c->args[0],c->args);
+	    }
+	    else if(strcmp(c->args[0],"jobs")==0)
+	    {
+	    	DumpJobs();
 	    }
 	    else//Run executable
 	    {
@@ -537,14 +553,44 @@ void CheckBgJobsStatus()
 				delete j;
 			}
 		}
-
-
 	}
 }
 
-void DumpJob(Job* j)
+
+void DumpJob(Job* j, ostream& os)
 {
-	cout<<"["<<j->GetJobID()<<"] "<<j->mCmdStr<<endl;
+	os<<"["<<j->GetJobID()<<"]\t("<<j->mCmdStr.str()<<")\t";
+	switch(j->state)
+	{
+		case Background: os<<"Background Running"; break;
+		case Foreground: os<<"Foreground Running"; break;
+		case Stopped: os<<"Suspended"; break;
+		case Terminated: os<<"Terminated";break;
+		default:break;
+	}
+	os<<endl;
+}
+
+
+void DumpJobs()
+{
+	for (map<int,Job*>::iterator it=BackgroundJobs.begin(); it!=BackgroundJobs.end(); ++it)
+	{
+		Job* j = it->second;
+		if(j && j->state!=Terminated)
+		{
+			DumpJob(j,cout);
+		}
+	}
+
+	for (map<int,Job*>::iterator it=SuspendedJobs.begin(); it!=SuspendedJobs.end(); ++it)
+	{
+		Job* j = it->second;
+		if(j)
+		{
+			DumpJob(j,cout);
+		}
+	}
 }
 
 int main(int argc, char *argv[])

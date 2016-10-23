@@ -20,6 +20,9 @@ int Job::num_jobs = 1;
 
 map<pid_t,Job*> sPid2Job;
 
+extern map<int,Job*> BackgroundJobs;
+extern map<int,Job*> SuspendedJobs;
+
 Job::Job(State s, Pipe p)
 {
 	mJobId = Job::num_jobs++;
@@ -35,12 +38,12 @@ void Job::ConstructCmdStr(Pipe p)
 	for(Cmd c= p->head; c ; c=c->next)
 	{
 		for(int i=0;i<c->nargs;i++)
-			mCmdStr<<c->args[i];
+			mCmdStr<<c->args[i]<<" ";
 
 		if(c->out==Tpipe)
-			mCmdStr<<"|";
+			mCmdStr<<" |";
 		else if(c->out==TpipeErr)
-			mCmdStr<<"|&";
+			mCmdStr<<" |&";
 	}
 
 
@@ -153,5 +156,9 @@ Job::~Job()
 		sPid2Job.erase(mProcesses[i]);
 	}
 
-	if(mJobId == num_jobs-1) num_jobs--;
+	if(state==Background)
+		BackgroundJobs.erase(mJobId);
+
+
+//	if(mJobId == num_jobs-1) num_jobs--;
 }
