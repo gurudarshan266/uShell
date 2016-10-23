@@ -2,6 +2,7 @@
 #include <vector>
 #include <map>
 #include "Job.h"
+#include <string>
 
 using namespace std;
 
@@ -41,14 +42,18 @@ void HandleCd(Cmd);
 void ManageIO(Cmd);
 void SetupPipes(Cmd,int*,int*);
 void ManageCmdSeq(Pipe& p);
-void RestoreShellState();
-void AttachShell2PG(pid_t);
+void DetachTerminal();
+void AttachTerminal(pid_t);
+void AssignPg(pid_t pid, pid_t& master);
 
 Job* ForegroundJob;
 map<int,Job*> BackgroundJobs;
 map<int,Job*> SuspendedJobs;
+extern std::map<pid_t,Job*> sPid2Job;
 
 pid_t origPgid;
+
+#define clog cerr
 
 void prCmd(Cmd c)
 {
@@ -257,6 +262,26 @@ bool IsBgCmd(Pipe p)
 			return true;
 		c=c->next;
 	}
+
+	return false;
+}
+
+bool ExecuteBuiltIn(Cmd c)
+{
+    if ( !strcmp(c->args[0], "end") )
+      exit(0);
+    else if(strcmp(c->args[0],"logout")==0)
+		HandleLogout(c);
+	else if(strcmp(c->args[0],"setenv")==0)
+    	HandleSetEnv(c);
+    else if(strcmp(c->args[0],"unsetenv")==0)
+		HandleUnsetEnv(c);
+    else if(strcmp(c->args[0],"cd")==0)
+		HandleCd(c);
+    else
+    	return false;//Not a builtin
+
+    return true;
 }
 
 void ManageCmdSeq(Pipe& p)
@@ -267,13 +292,13 @@ void ManageCmdSeq(Pipe& p)
 
 	pid_t master_pid = 0;
 
-	bool isBg = IsBgCmd(p);
+	bool isBackgroundProc = IsBgCmd(p);
 
-	Job* job = new Job( (isBg) ? Background : Foreground );
+	Job* job = new Job( (isBackgroundProc) ? Background : Foreground , p);
 
 	for (Cmd c = p->head; c != NULL; c = c->next )
 	{
-		if(strcmp(c->args[0],"end")==0)
+		if(strcmp(c->args[0],"end")==0 || strcmp(c->args[0],"logout")==0 )
 			exit(0);
 
 		if(c->out == Tpipe || c->out == TpipeErr)
@@ -293,31 +318,53 @@ void ManageCmdSeq(Pipe& p)
 
 	job->DumpJobStr();
 
-	if(!isBg)
+	if(!isBackgroundProc)
 	{
 		ForegroundJob = job;
-		cout << "STDIN currently owned by " << tcgetpgrp(0) << endl;
-		AttachShell2PG(job->GetPgid());
+		clog << "STDIN currently owned by " << tcgetpgrp(0) << endl;
+		AttachTerminal(job->GetPgid());
 
 		int retStat = 0;
 		pid_t pp = 1;
 		while (pp > 0) {
 			//Wait on the PG
-			pp = waitpid(-getpgrp(), &retStat, WUNTRACED);
-			cout << "PID = " << pp << " Status = " << retStat << endl;
+			pp = waitpid(-1, &retStat, WUNTRACED);
+
+			if(pp<0) break;
+
+			if(WIFEXITED(retStat)|| WIFSIGNALED(retStat))
+			{
+				Job* j = sPid2Job[pp];
+				j->UpdateProcState(pp, Dead);
+
+				clog<<"EXITED PID = "<<pp<<" JobID = "<<j->GetJobID()<<" status = "<<retStat<<endl;
+
+				State state = j->state;
+
+				if(j->IsTerminated())
+				{
+					if(state==Background) cout<<"Background ";
+					cout<<"Job["<<j->GetJobID()<<"] has Terminated"<<endl;
+
+					if(j==ForegroundJob)
+						break;
+					if(j!=ForegroundJob && j!=NULL) delete j;
+				}
+			}
 
 			//Even if one process in the group is sent to sleep. Assume that all of them have been sent to sleep
 			if (WIFSTOPPED(retStat)) {
-				cout << " Stopped by signal " << WSTOPSIG(retStat) << endl;
+				clog<< " Stopped by signal " << WSTOPSIG(retStat) << endl;
 				break;
 			}
 		}
 
 		//	while(wait(NULL)!=-1);
 
+		delete ForegroundJob;
 		ForegroundJob = NULL;
 
-		RestoreShellState();
+		DetachTerminal();
 	}//if(!isBg)
 	else
 	{
@@ -343,47 +390,62 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master
 		signal(SIGINT, SIG_DFL);
 		signal(SIGTSTP,SIG_DFL);
 
-		if(master==0)//No master yet
-		{
-			master = getpid();
-			if(getpgrp()==origPgid)
-				setpgid(0,0);//Current process and PGID=PID
-		}
+		AssignPg(getpid(),master);
 
-		setpgid(0,master);//Current process and PGID = master
+		if(strcmp(c->args[0],"setenv")==0)
+	    	HandleSetEnv(c);
+	    else if(strcmp(c->args[0],"unsetenv")==0)
+			HandleUnsetEnv(c);
+	    else if(strcmp(c->args[0],"where")==0)
+	    {
+	    	strcpy(c->args[0],"which");
+	    	execvp(c->args[0],c->args);
+	    }
+	    else//Run executable
+	    {
+			int res = execvp(c->args[0],c->args);
+			cout<<c->args[0]<<": command not found"<<endl;
+			exit(-1);
+	    }
 
-		int res = execvp(c->args[0],c->args);
-		cout<<c->args[0]<<": command not found"<<endl;
-		exit(-1);
+		exit(0);
 	}
 	//parent
 	else
 	{
-
-		//Add it to list processes in the job
-		if(cpid>0)
-		{
-			//If no master has not been assigned yet (need to be executed only once)
-			if(master==0)
-			{
-				//Already set just need to copy the value to master
-				if(cpid == getpgrp())
-				{
-					cout<<"Already set just need to copy the value to master"<<endl;
-					master = cpid;
-				}
-				//set the master and the tid
-				else if(origPgid == getpgid(cpid))
-				{
-					cout<<"Already set just need to copy the value to master"<<endl;
-					setpgid(cpid,0);
-					master = getpgid(cpid);
-				}
-			}
-			job->AddProcess(cpid);
-		}
+		AssignPg(cpid,master);
+		job->AddProcess(cpid);
 	}
 
+}
+
+bool IsPgAssigned(pid_t pid)
+{
+	return (pid==getpgid(pid)) || (origPgid!=getpgid(pid));
+}
+
+void AssignPg(pid_t pid, pid_t& master)
+{
+	string prefix = (getpid()==origPgid) ? "shell":"child";
+
+	if(!IsPgAssigned(pid))
+	{
+		if(master == 0)
+		{
+			setpgid(pid, 0);
+			master = getpgid(pid);
+			clog<<"In "<<prefix<<" : Modified Master = "<<master<<" PG= "<<getpgid(pid)<<" assigned to "<<pid<<endl;
+		}
+		else
+		{
+			setpgid(pid, master);
+			clog<<"In "<<prefix<<" : Unmodified Master = "<<master<<" PG= "<<getpgid(pid)<<" assigned to "<<pid<<endl;
+		}
+	}
+	else
+	{
+		clog<<"In "<<prefix<<" : correct PG="<<getpgid(pid)<<" already assigned to "<<pid<<endl;
+	}
 }
 
 void sigint_handler(int signo)
@@ -433,24 +495,56 @@ void RegisterSigHandlers()
 //	signal(SIGTSTP,SIG_IGN);
 }
 
-void RestoreShellState()
+void DetachTerminal()
 {
-	if(setpgid(0, origPgid)>=0)
+	tcsetpgrp(STDIN_FILENO, getpgrp());
+	clog << "Terminal state restored";
+	clog << "\tPGID = " << getpgrp() << endl;
+}
+
+void AttachTerminal(pid_t pgid)
+{
+	tcsetpgrp(STDIN_FILENO, pgid);
+	clog<<"Terminal attached to ";
+	clog<<"\tPGID = "<<pgid<<endl;
+}
+
+void CheckBgJobsStatus()
+{
+	pid_t pp = 1;
+	int retStat;
+	while(pp>0)
 	{
-		tcsetpgrp(STDIN_FILENO, getpgrp());
-		cout<<"Shell state restored";
-		cout<<"\tPGID = "<<getpgrp()<<endl;
+		pp = waitpid(-1, &retStat, WNOHANG );
+
+		if(pp<=0) break;
+
+		if(WIFEXITED(retStat) || WIFSIGNALED(retStat))
+		{
+			Job* j = sPid2Job[pp];
+			j->UpdateProcState(pp, Dead);
+
+			clog<<"EXITED PID = "<<pp<<" JobID = "<<j->GetJobID()<<" status = "<<retStat<<endl;
+
+			State state = j->state;
+
+			if(j->IsTerminated())
+			{
+				if(state==Background)
+					cout<<"Background ";
+				cout<<"Job["<<j->GetJobID()<<"] has Terminated/Completed"<<endl;
+
+				delete j;
+			}
+		}
+
+
 	}
 }
 
-void AttachShell2PG(pid_t pgid)
+void DumpJob(Job* j)
 {
-	if(setpgid(0, pgid)>=0)
-	{
-		tcsetpgrp(STDIN_FILENO, getpgrp());
-		cout<<"Shell attached to ";
-		cout<<"\tPGID = "<<getpgrp()<<endl;
-	}
+	cout<<"["<<j->GetJobID()<<"] "<<j->mCmdStr<<endl;
 }
 
 int main(int argc, char *argv[])
@@ -466,12 +560,16 @@ int main(int argc, char *argv[])
 
   while ( 1 ) {
 	getcwd(cwd, sizeof(cwd));
+	CheckBgJobsStatus();
 	printf("%s: "ANSI_COLOR_CYAN"%s "ANSI_COLOR_RESET"%% ", host, cwd);
 	p = parse();
-	if(p) ManageCmdSeq(p);
+	while(p != NULL)
+	{
+		ManageCmdSeq(p);
+		p = p->next;
+	}
 //	prPipe(p);
 	freePipe(p);
   }
 }
 
-/*........................ end of main.c ....................................*/

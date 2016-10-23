@@ -9,15 +9,27 @@
 #define JOB_H_
 
 #include <vector>
+#include <map>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sstream>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include "parse.h"
+
+#ifdef __cplusplus
+}
+#endif
 
 typedef enum { Foreground, Background, Stopped, Terminated } State;
+typedef enum { Running, Sleeping, Dead} ProcState;
 
 class Job {
 public:
-	Job(State s);
-	Job(char*);
+	Job(State s,Pipe p=NULL);
 	virtual ~Job();
 
 	void AddProcess(pid_t p);
@@ -31,15 +43,22 @@ public:
 	void SetPgid(pid_t p);
 	void SetPgid2Master();
 
+	bool UpdateProcState(pid_t pid, ProcState state);
+	bool IsTerminated();
+
 	State state;
+	std::ostringstream mCmdStr;
 
 private:
+	void ConstructCmdStr(Pipe p);
+
 	std::vector<pid_t> mProcesses;
+	std::vector<ProcState> mProcessesState;
 	int mJobId;
-	char mCommandStr[1024];
 	pid_t mPgid;
 
 	static int num_jobs;
+
 };
 
 #endif /* JOB2_H_ */

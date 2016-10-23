@@ -12,22 +12,38 @@
 #include <unistd.h>
 #include <signal.h>
 #include <errno.h>
+#include <map>
 
 using namespace std;
 
 int Job::num_jobs = 1;
 
-Job::Job(State s):state(s)
+map<pid_t,Job*> sPid2Job;
+
+Job::Job(State s, Pipe p)
 {
 	mJobId = Job::num_jobs++;
 	mPgid = -1;
+	state = s;
+
+	if(p)
+		ConstructCmdStr(p);
 }
 
-Job::Job(char* commandStr)
+void Job::ConstructCmdStr(Pipe p)
 {
-	mJobId = Job::num_jobs++;
-	strcpy(mCommandStr,commandStr);
-	mPgid = -1;
+	for(Cmd c= p->head; c ; c=c->next)
+	{
+		for(int i=0;i<c->nargs;i++)
+			mCmdStr<<c->args[i];
+
+		if(c->out==Tpipe)
+			mCmdStr<<"|";
+		else if(c->out==TpipeErr)
+			mCmdStr<<"|&";
+	}
+
+
 }
 
 void Job::DumpJobStr()
@@ -38,7 +54,8 @@ void Job::DumpJobStr()
 		cout<<mProcesses[i]<<" ";
 	}
 
-	cout<<"\tPGID="<<getpgid(mProcesses[0]);
+	if(mProcesses.size()>0)
+		cout<<"\tPGID="<<getpgid(mProcesses[0]);
 	if(state == Background)
 		cout<<" &";
 	cout<<endl;
@@ -58,6 +75,8 @@ void Job::AddProcess(pid_t p)
 		setpgid(p, mPgid);*/
 
 	mProcesses.push_back(p);
+	mProcessesState.push_back(Running);
+	sPid2Job[p] = this;
 }
 
 void Job::SetPgid(pid_t p)
@@ -94,6 +113,45 @@ void Job::SendSignal(int sig_no)
 	}
 }
 
+bool Job::UpdateProcState(pid_t pid, ProcState state)
+{
+	for(int i=0; i<mProcesses.size();i++)
+	{
+		if(pid == mProcesses[i])
+		{
+			mProcessesState[i] = state;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool Job::IsTerminated()
+{
+	for(int i=0;i<mProcessesState.size();i++)
+	{
+		if(mProcessesState[i]!=Dead)
+		{
+			return false;
+		}
+	}
+
+	state = Terminated;
+	return true;
+}
+
 Job::~Job()
 {
+	map<pid_t,Job*>::iterator it;
+
+	if(!IsTerminated())
+		clog<<"Job deletion called without terminating all the processess"<<endl;
+
+	for(int i=0;i<mProcesses.size();i++)
+	{
+		sPid2Job.erase(mProcesses[i]);
+	}
+
+	if(mJobId == num_jobs-1) num_jobs--;
 }
