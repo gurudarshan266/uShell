@@ -756,6 +756,55 @@ void DumpJobs()
 	}
 }
 
+int ReadCmdFile(const char* filename)
+{
+	cout<<"Reading file "<<filename<<endl;
+
+	int fd = open(filename,O_RDONLY);
+
+	if(fd<0) {
+		DISP_ERR;
+		return -1;
+
+	}
+
+	int stdin_cp = dup(STDIN_FILENO);
+
+	dup2(fd, STDIN_FILENO);
+	close(fd);
+
+	Pipe p;
+
+	int flag = 0;
+
+	clog<<"Reading cmds"<<endl;
+	while (!feof(stdin))
+	{
+		CheckBgJobsStatus();
+		p = parse();
+		while (p != NULL)
+		{
+			//When end of file is detected
+			if(strcmp(p->head->args[0],"end")==0)
+			{
+				flag=1;
+				break;
+			}
+			ManageCmdSeq(p);
+			p = p->next;
+		}
+		freePipe( p);
+		if(flag==1) break;
+	}
+
+	clog<<"Completed reading the file"<<endl;
+
+	close(STDIN_FILENO);
+	dup(stdin_cp);
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
   Pipe p;
@@ -767,10 +816,18 @@ int main(int argc, char *argv[])
 
   origPgid = getpgrp();
 
+  char filename[1024];
+  strcat(filename,getenv("HOME"));
+  strcat(filename,"/.ushrc");
+
+//  ReadCmdFile(filename.str().c_str());
+  ReadCmdFile("/home/guru/.ushrc");
+
   while ( 1 ) {
 	getcwd(cwd, sizeof(cwd));
 	CheckBgJobsStatus();
 	printf("%s: "ANSI_COLOR_CYAN"%s "ANSI_COLOR_RESET"%% ", host, cwd);
+	fflush( stdout );
 	p = parse();
 	while(p != NULL)
 	{
