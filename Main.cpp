@@ -382,7 +382,7 @@ void ManageCmdSeq(Pipe& p)
 		return;
 	}
 	//For "kill" command
-	if(strcmp(p->head->args[0],"kill")==0)
+	else if(strcmp(p->head->args[0],"kill")==0)
 	{
 		isJobCtrlCmd = true;
 		int jobId;
@@ -452,7 +452,7 @@ Job* BringToFg(int jobId)
 	{
 		Job* j = BackgroundJobs[jobId];
 		BackgroundJobs.erase(jobId);
-		cout<<"Job found in BackgroundJobs"<<endl;
+		clog<<"Job found in BackgroundJobs"<<endl;
 		//Race condition during clean up. Avoiding terminated cases which aren't yet cleaned up
 		if(j->state == Background)
 		{
@@ -515,7 +515,7 @@ Job* Kill(int jobId)
 	{
 		Job* j = BackgroundJobs[jobId];
 		BackgroundJobs.erase(jobId);
-		cout<<"Job found in BackgroundJobs"<<endl;
+		clog<<"Job found in BackgroundJobs"<<endl;
 		//Race condition during clean up. Avoiding terminated cases which aren't yet cleaned up
 		if(j->state == Background)
 		{
@@ -537,7 +537,7 @@ Job* Kill(int jobId)
 		if(j->state == Stopped)
 		{
 			kill(-j->GetPgid(),SIGKILL);
-			cout<<"Job found in SuspendedJobs"<<endl;
+			clog<<"Job found in SuspendedJobs"<<endl;
 			j->state = Foreground;
 			ForegroundJob = j;
 			return ForegroundJob;
