@@ -38,12 +38,12 @@ void Job::ConstructCmdStr(Pipe p)
 	for(Cmd c= p->head; c ; c=c->next)
 	{
 		for(int i=0;i<c->nargs;i++)
-			mCmdStr<<c->args[i]<<" ";
+			mCmdStr<<" "<<c->args[i]<<" ";
 
 		if(c->out==Tpipe)
-			mCmdStr<<" |";
+			mCmdStr<<"|";
 		else if(c->out==TpipeErr)
-			mCmdStr<<" |&";
+			mCmdStr<<"|&";
 	}
 
 

@@ -49,6 +49,8 @@ void AssignPg(pid_t pid, pid_t& master);
 void DumpJobs();
 void DumpJob(Job* j, ostream& os);
 Job* BringToFg(int jobId);
+Job* SendToBg(int jobId);
+
 
 Job* ForegroundJob;
 map<int,Job*> BackgroundJobs;
@@ -319,7 +321,10 @@ void WaitOnFg()
 				j->state = Terminated;
 
 				if(j==ForegroundJob)
+				{
+					delete j;
 					break;
+				}
 
 				if(j!=ForegroundJob && j!=NULL)
 					delete j;
@@ -429,26 +434,31 @@ Job* BringToFg(int jobId)
 	{
 		Job* j = BackgroundJobs[jobId];
 		BackgroundJobs.erase(jobId);
-
+		cout<<"Job found in BackgroundJobs"<<endl;
 		//Race condition during clean up. Avoiding terminated cases which aren't yet cleaned up
 		if(j->state == Background)
 		{
 			j->state = Foreground;
 			ForegroundJob = j;
 			return ForegroundJob;
-/*			clog << "STDIN currently owned by " << tcgetpgrp(0) << endl;
-			AttachTerminal(job->GetPgid());
+		}
 
-			int retStat = 0;
-			pid_t pp = 1;
+	}
 
-			WaitOnFg();
+	//If it's a Suspended process
+	else if(SuspendedJobs.find(jobId) != SuspendedJobs.end())
+	{
+		Job* j = SuspendedJobs[jobId];
+		SuspendedJobs.erase(jobId);
 
-			//	while(wait(NULL)!=-1);
-
-			ForegroundJob = NULL;
-
-			DetachTerminal();*/
+		//Race condition during clean up. Avoiding terminated cases which aren't yet cleaned up
+		if(j->state == Stopped)
+		{
+			kill(-j->GetPgid(),SIGCONT);
+			clog<<"Job found in SuspendedJobs"<<endl;
+			j->state = Foreground;
+			ForegroundJob = j;
+			return ForegroundJob;
 		}
 
 	}
@@ -457,6 +467,26 @@ Job* BringToFg(int jobId)
 
 }
 
+Job* SendToBg(int jobId)
+{
+	//If it's a Suspended process
+	if(SuspendedJobs.find(jobId) != SuspendedJobs.end())
+	{
+		Job* j = SuspendedJobs[jobId];
+		SuspendedJobs.erase(jobId);
+
+		//Race condition during clean up. Avoiding terminated cases which aren't yet cleaned up
+		if(j->state == Stopped)
+		{
+			kill(-j->GetPgid(),SIGCONT);
+			clog<<"Job found in SuspendedJobs"<<endl;
+			j->state = Background;
+			return j;
+		}
+	}
+
+	return NULL;
+}
 /*
  * Look in absolute or relative path for the executable
  * If not found, search in PATH for the executable
@@ -553,6 +583,7 @@ void sigtstp_handler(int signo)
   if (signo == SIGTSTP)
     printf("\nReceived SIGTSTP\n");
 
+  return;
   if(ForegroundJob)
   {
 	  cout<<"["<<ForegroundJob->GetJobID()<<"] Stopped"<<endl;
