@@ -372,6 +372,15 @@ void ManageCmdSeq(Pipe& p)
 		job = BringToFg(jobId);
 		if(!job) return;
 	}
+	//For "fg" command
+	else if(strcmp(p->head->args[0],"bg")==0)
+	{
+		isJobCtrlCmd = true;
+		int jobId;
+		sscanf(p->head->args[1],"%%%d",&jobId);
+		job = SendToBg(jobId);
+		return;
+	}
 	else
 	{
 		job = new Job( (isBackgroundProc) ? Background : Foreground , p);
@@ -481,6 +490,7 @@ Job* SendToBg(int jobId)
 			kill(-j->GetPgid(),SIGCONT);
 			clog<<"Job found in SuspendedJobs"<<endl;
 			j->state = Background;
+			BackgroundJobs[j->GetJobID()]=j;
 			return j;
 		}
 	}
