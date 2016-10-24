@@ -50,7 +50,7 @@ void DumpJobs();
 void DumpJob(Job* j, ostream& os);
 Job* BringToFg(int jobId);
 Job* SendToBg(int jobId);
-
+Job* Kill(int jobId);
 
 Job* ForegroundJob;
 map<int,Job*> BackgroundJobs;
@@ -372,7 +372,7 @@ void ManageCmdSeq(Pipe& p)
 		job = BringToFg(jobId);
 		if(!job) return;
 	}
-	//For "fg" command
+	//For "bg" command
 	else if(strcmp(p->head->args[0],"bg")==0)
 	{
 		isJobCtrlCmd = true;
@@ -380,6 +380,15 @@ void ManageCmdSeq(Pipe& p)
 		sscanf(p->head->args[1],"%%%d",&jobId);
 		job = SendToBg(jobId);
 		return;
+	}
+	//For "kill" command
+	if(strcmp(p->head->args[0],"kill")==0)
+	{
+		isJobCtrlCmd = true;
+		int jobId;
+		sscanf(p->head->args[1],"%%%d",&jobId);
+		job = Kill(jobId);
+		if(!job) return;
 	}
 	else
 	{
@@ -497,6 +506,49 @@ Job* SendToBg(int jobId)
 
 	return NULL;
 }
+
+
+Job* Kill(int jobId)
+{
+	//If it's a Background process
+	if(BackgroundJobs.find(jobId) != BackgroundJobs.end())
+	{
+		Job* j = BackgroundJobs[jobId];
+		BackgroundJobs.erase(jobId);
+		cout<<"Job found in BackgroundJobs"<<endl;
+		//Race condition during clean up. Avoiding terminated cases which aren't yet cleaned up
+		if(j->state == Background)
+		{
+			kill(-j->GetPgid(),SIGKILL);
+			j->state = Foreground;
+			ForegroundJob = j;
+			return ForegroundJob;
+		}
+
+	}
+
+	//If it's a Suspended process
+	else if(SuspendedJobs.find(jobId) != SuspendedJobs.end())
+	{
+		Job* j = SuspendedJobs[jobId];
+		SuspendedJobs.erase(jobId);
+
+		//Race condition during clean up. Avoiding terminated cases which aren't yet cleaned up
+		if(j->state == Stopped)
+		{
+			kill(-j->GetPgid(),SIGKILL);
+			cout<<"Job found in SuspendedJobs"<<endl;
+			j->state = Foreground;
+			ForegroundJob = j;
+			return ForegroundJob;
+		}
+
+	}
+
+	return NULL;
+
+}
+
 /*
  * Look in absolute or relative path for the executable
  * If not found, search in PATH for the executable
