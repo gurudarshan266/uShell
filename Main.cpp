@@ -388,6 +388,10 @@ void WaitOnFg()
 					cout<<"Background ";
 					cout<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
 				}
+				else if(WIFSIGNALED(retStat))
+				{
+					cout<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
+				}
 //					cout<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
 				j->state = Terminated;
 
