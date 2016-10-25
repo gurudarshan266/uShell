@@ -4,6 +4,7 @@
 #include "Job.h"
 #include <string>
 #include <sstream>
+#include <fstream>
 
 using namespace std;
 
@@ -34,6 +35,8 @@ extern "C" {
 #define ANSI_COLOR_CYAN    "\x1b[36m"
 #define ANSI_COLOR_RESET   "\x1b[0m"
 
+ofstream logfile;
+
 void HandleExecutable(Cmd c,int*,int*,Job*,pid_t&);
 void HandleSetEnv(Cmd);
 void HandleUnsetEnv(Cmd);
@@ -61,7 +64,7 @@ vector<char*> ExtendedBuiltins;
 
 pid_t origPgid;
 
-#define clog cerr
+#define clog logfile
 
 bool IsBuiltin(char* str, bool extended=false)
 {
@@ -460,7 +463,7 @@ void ManageCmdSeq(Pipe& p)
 	}
 	else if(!IsSubshellReq(p->head))
 	{
-		cout<<"Executing builtin commands in place"<<endl;
+		clog<<"Executing builtin commands in place"<<endl;
 		ExecuteBuiltIn(p->head);
 		return;
 	}
@@ -931,6 +934,9 @@ void InitializeBuiltinList()
 
 int main(int argc, char *argv[])
 {
+  logfile.open("err.txt");
+
+
   Pipe p;
   const char *host = getenv("USER");
 

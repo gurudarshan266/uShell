@@ -16,6 +16,8 @@
 
 using namespace std;
 
+extern ofstream logfile;
+
 int Job::num_jobs = 1;
 
 map<pid_t,Job*> sPid2Job;
