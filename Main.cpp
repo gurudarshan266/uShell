@@ -56,10 +56,37 @@ Job* ForegroundJob;
 map<int,Job*> BackgroundJobs;
 map<int,Job*> SuspendedJobs;
 extern std::map<pid_t,Job*> sPid2Job;
+vector<char*> Builtins;
+vector<char*> ExtendedBuiltins;
 
 pid_t origPgid;
 
 #define clog cerr
+
+bool IsBuiltin(char* str, bool extended=false)
+{
+	for(int i=0;i < Builtins.size(); i++)
+	{
+		if(!strcmp(Builtins[i],str))
+			return true;
+	}
+
+	if(extended)
+	{
+		for(int i=0;i < ExtendedBuiltins.size(); i++)
+		{
+			if(!strcmp(ExtendedBuiltins[i],str))
+				return true;
+		}
+	}
+
+	return false;
+}
+
+bool IsSubshellReq(Cmd c)
+{
+	return !(IsBuiltin(c->args[0]) && (c->next==NULL));
+}
 
 void prCmd(Cmd c)
 {
@@ -274,16 +301,57 @@ bool IsBgCmd(Pipe p)
 
 bool ExecuteBuiltIn(Cmd c)
 {
+	bool isJobCtrlCmd = false;
+	Job* job;
+
     if ( !strcmp(c->args[0], "end") )
       exit(0);
+
     else if(strcmp(c->args[0],"logout")==0)
 		HandleLogout(c);
+
 	else if(strcmp(c->args[0],"setenv")==0)
     	HandleSetEnv(c);
+
     else if(strcmp(c->args[0],"unsetenv")==0)
 		HandleUnsetEnv(c);
+
     else if(strcmp(c->args[0],"cd")==0)
 		HandleCd(c);
+
+    else if(strcmp(c->args[0],"jobs")==0)
+    {
+    	DumpJobs();
+    }
+
+	//For "fg" command
+/*	if(strcmp(c->args[0],"fg")==0)
+	{
+		isJobCtrlCmd = true;
+		int jobId;
+		sscanf(p->head->args[1],"%%%d",&jobId);
+		job = BringToFg(jobId);
+//		if(!job) return;
+	}
+	//For "bg" command
+	else if(strcmp(c->args[0],"bg")==0)
+	{
+		isJobCtrlCmd = true;
+		int jobId;
+		sscanf(p->head->args[1],"%%%d",&jobId);
+		job = SendToBg(jobId);
+//		return;
+	}
+	//For "kill" command
+	else if(strcmp(c->args[0],"kill")==0)
+	{
+		isJobCtrlCmd = true;
+		int jobId;
+		sscanf(p->head->args[1],"%%%d",&jobId);
+		job = Kill(jobId);
+//		if(!job) return;
+	}*/
+
     else
     	return false;//Not a builtin
 
@@ -390,6 +458,12 @@ void ManageCmdSeq(Pipe& p)
 		job = Kill(jobId);
 		if(!job) return;
 	}
+	else if(!IsSubshellReq(p->head))
+	{
+		cout<<"Executing builtin commands in place"<<endl;
+		ExecuteBuiltIn(p->head);
+		return;
+	}
 	else
 	{
 		job = new Job( (isBackgroundProc) ? Background : Foreground , p);
@@ -404,6 +478,7 @@ void ManageCmdSeq(Pipe& p)
 		if(c->out == Tpipe || c->out == TpipeErr)
 			pipe(pipeFd[index]);//Next pipe
 
+
 		HandleExecutable(c, pipeFd[index-1], pipeFd[index], job, master_pid);
 
 		//Highly essential to send EOF
@@ -415,6 +490,7 @@ void ManageCmdSeq(Pipe& p)
 
 		index++;
 	}//for
+
 
 	if(job->state==Background)
 		DumpJob(job,cout);
@@ -447,6 +523,12 @@ void ManageCmdSeq(Pipe& p)
 
 Job* BringToFg(int jobId)
 {
+	if(getpgrp()!=origPgid)
+	{
+		cout<<"No job control in subshells"<<endl;
+		exit(0);
+	}
+
 	//If it's a Background process
 	if(BackgroundJobs.find(jobId) != BackgroundJobs.end())
 	{
@@ -487,6 +569,12 @@ Job* BringToFg(int jobId)
 
 Job* SendToBg(int jobId)
 {
+	if(getpgrp()!=origPgid)
+	{
+		cout<<"No job control in subshells"<<endl;
+		exit(0);
+	}
+
 	//If it's a Suspended process
 	if(SuspendedJobs.find(jobId) != SuspendedJobs.end())
 	{
@@ -556,7 +644,15 @@ Job* Kill(int jobId)
 void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master)
 {
 
-	pid_t cpid = fork();
+	pid_t cpid = 0;
+
+	if(!IsSubshellReq(c))
+	{
+		ExecuteBuiltIn(c);
+		return;
+	}
+
+	cpid= fork();
 
 	// Child
 	if(cpid == 0)
@@ -569,19 +665,11 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master
 
 		AssignPg(getpid(),master);
 
-		if(strcmp(c->args[0],"setenv")==0)
-	    	HandleSetEnv(c);
-	    else if(strcmp(c->args[0],"unsetenv")==0)
-			HandleUnsetEnv(c);
-	    else if(strcmp(c->args[0],"where")==0)
-	    {
-	    	strcpy(c->args[0],"which");
-	    	execvp(c->args[0],c->args);
-	    }
-	    else if(strcmp(c->args[0],"jobs")==0)
-	    {
-	    	DumpJobs();
-	    }
+		if(IsBuiltin(c->args[0]))
+		{
+			ExecuteBuiltIn(c);
+			cout<<"Executing built-in in sub-shell"<<endl;
+		}
 	    else//Run executable
 	    {
 			int res = execvp(c->args[0],c->args);
@@ -805,12 +893,31 @@ int ReadCmdFile(const char* filename)
 	return 0;
 }
 
+void InitializeBuiltinList()
+{
+	Builtins.push_back("bg");
+	Builtins.push_back("fg");
+	Builtins.push_back("jobs");
+	Builtins.push_back("setenv");
+	Builtins.push_back("unsetenv");
+	Builtins.push_back("nice");
+	Builtins.push_back("cd");
+	Builtins.push_back("logout");
+	Builtins.push_back("kill");
+
+	ExtendedBuiltins.push_back("echo");
+	ExtendedBuiltins.push_back("pwd");
+	ExtendedBuiltins.push_back("where");
+
+}
+
 int main(int argc, char *argv[])
 {
   Pipe p;
   const char *host = getenv("USER");
 
   RegisterSigHandlers();
+  InitializeBuiltinList();
 
   char cwd[1024] = "";
 
