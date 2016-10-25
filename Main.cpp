@@ -665,7 +665,25 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master
 
 		AssignPg(getpid(),master);
 
-		if(IsBuiltin(c->args[0]))
+		if(!strcmp(c->args[0],"where"))
+		{
+			if(c->nargs < 2 )
+			{
+				cout<<"Missing arguments"<<endl;
+				exit(0);
+			}
+			if(IsBuiltin(c->args[1],true))
+			{
+				cout<<c->args[1]<<": shell built-in command"<<endl;
+			}
+			else
+			{
+				strcpy(c->args[0],"which");
+				execvp(c->args[0],c->args);
+				exit(0);
+			}
+		}
+		else if(IsBuiltin(c->args[0]))
 		{
 			ExecuteBuiltIn(c);
 			cout<<"Executing built-in in sub-shell"<<endl;

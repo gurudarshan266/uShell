@@ -148,7 +148,7 @@ bool Job::IsSuspended()
 {
 	for(int i=0;i<mProcessesState.size();i++)
 	{
-		if(mProcessesState[i]!=Sleeping)
+		if(!(mProcessesState[i]==Sleeping || mProcessesState[i]==Dead))
 		{
 			return false;
 		}
