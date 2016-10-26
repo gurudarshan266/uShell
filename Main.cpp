@@ -91,6 +91,16 @@ bool IsSubshellReq(Cmd c)
 	return !(IsBuiltin(c->args[0]) && (c->next==NULL));
 }
 
+bool IsJobCtrlCmd(Cmd c)
+{
+	if( !strcmp(c->args[0],"fg") ||
+		!strcmp(c->args[0],"bg") ||
+		!strcmp(c->args[0],"jobs"))
+		return true;
+
+	return false;
+}
+
 void prCmd(Cmd c)
 {
   int i;
@@ -220,7 +230,8 @@ void HandleCd(Cmd c)
 		cout<<strerror(errno)<<endl;
 }
 
-
+int stdout_cpy = 1;
+int stderr_cpy = 2;
 void ManageIO(Cmd c)
 {
 	int fd[2];
@@ -240,7 +251,7 @@ void ManageIO(Cmd c)
 	if(c->out == Tout || c->out == Tapp || c->out == ToutErr || c->out == TappErr)//If output to a file
 	{
 		int flags= O_WRONLY | O_CREAT;
-		flags |= ( (c->out==Tapp)? O_APPEND : 0 );
+		flags |= ( (c->out==Tapp || c->out==TappErr)? O_APPEND : O_TRUNC );
 
 		int mode = S_IRUSR | S_IWUSR;
 
@@ -252,12 +263,33 @@ void ManageIO(Cmd c)
 			exit(-1);
 		}
 
+		if(getpgrp()==origPgid)
+			stdout_cpy = dup(OUT);
+
 		dup2(fd[OUT],OUT);//Make the new fd, the stdout for this process
 
 		if(c->out == ToutErr || c->out == TappErr)
 		{
+			if(getpgrp()==origPgid)
+				stderr_cpy = dup(ERR);
+
 			dup2(fd[OUT],ERR);
 		}
+	}
+}
+
+void RestoreIO(Cmd c)
+{
+	if(c->out == Tout || c->out == Tapp)//If output to a file
+	{
+		close(OUT);
+		dup2(stdout_cpy,OUT);
+	}
+
+	else if(c->out == ToutErr || c->out == TappErr)
+	{
+		close(ERR);
+		dup2(stderr_cpy,ERR);
 	}
 }
 
@@ -468,7 +500,9 @@ void ManageCmdSeq(Pipe& p)
 	else if(!IsSubshellReq(p->head))
 	{
 		clog<<"Executing builtin commands in place"<<endl;
+		ManageIO(p->head);
 		ExecuteBuiltIn(p->head);
+		RestoreIO(p->head);
 		return;
 	}
 	else
@@ -655,7 +689,9 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master
 
 	if(!IsSubshellReq(c))
 	{
+		ManageIO(c);
 		ExecuteBuiltIn(c);
+		RestoreIO(c);
 		return;
 	}
 
