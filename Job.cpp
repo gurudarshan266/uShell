@@ -172,7 +172,7 @@ Job::~Job()
 		sPid2Job.erase(mProcesses[i]);
 	}
 
-	if(state==Background && BackgroundJobs.find(mJobId)!=BackgroundJobs.end())
+	if(BackgroundJobs.find(mJobId)!=BackgroundJobs.end())
 	{
 		BackgroundJobs.erase(mJobId);
 	}

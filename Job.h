@@ -50,11 +50,12 @@ public:
 	State state;
 	std::ostringstream mCmdStr;
 
+	std::vector<pid_t> mProcesses;
+	std::vector<ProcState> mProcessesState;
+
 private:
 	void ConstructCmdStr(Pipe p);
 
-	std::vector<pid_t> mProcesses;
-	std::vector<ProcState> mProcessesState;
 	int mJobId;
 	pid_t mPgid;
 

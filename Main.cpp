@@ -815,7 +815,8 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master
 	    else//Run executable
 	    {
 			int res = execvp(c->args[0],c->args);
-			cout<<c->args[0]<<": command not found"<<endl;
+			cerr<<c->args[0]<<": command not found"<<endl;
+			kill(-getpgrp(),SIGKILL);
 			exit(-1);
 	    }
 
@@ -952,7 +953,14 @@ void CheckBgJobsStatus()
 
 void DumpJob(Job* j, ostream& os)
 {
-	os<<"["<<j->GetJobID()<<"]\t("<<j->mCmdStr.str()<<")\t";
+	os<<"["<<j->GetJobID()<<"] ";
+
+	for(int i=0; i<j->mProcesses.size();i++)
+	{
+		os<<j->mProcesses[i]<<" ";
+	}
+
+	os<<"\t("<<j->mCmdStr.str()<<")\t";
 	switch(j->state)
 	{
 		case Background: os<<"Background Running"; break;
@@ -970,19 +978,21 @@ void DumpJobs()
 	for (map<int,Job*>::iterator it=BackgroundJobs.begin(); it!=BackgroundJobs.end(); ++it)
 	{
 		Job* j = it->second;
-		if(j && j->state!=Terminated && j->state!=Foreground)
-		{
-			DumpJob(j,cout);
-		}
+		if(j)
+			if( j->state!=Terminated && j->state!=Foreground)
+			{
+				DumpJob(j,cout);
+			}
 	}
 
 	for (map<int,Job*>::iterator it=SuspendedJobs.begin(); it!=SuspendedJobs.end(); ++it)
 	{
 		Job* j = it->second;
-		if(j && j->state!=Terminated && j->state!=Foreground)
-		{
-			DumpJob(j,cout);
-		}
+		if(j)
+			if(j->state!=Terminated && j->state!=Foreground)
+			{
+				DumpJob(j,cout);
+			}
 	}
 }
 
