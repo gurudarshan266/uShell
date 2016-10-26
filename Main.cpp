@@ -236,7 +236,7 @@ void ManageIO(Cmd c)
 {
 	int fd[2];
 
-	if(c->in == Tin)//If input from a file
+	if(c->in == Tin && getpgrp()!=origPgid)//If input from a file
 	{
 		fd[IN] = open(c->infile,O_RDONLY);
 		if(fd[IN] < 0)
@@ -286,8 +286,10 @@ void RestoreIO(Cmd c)
 		dup2(stdout_cpy,OUT);
 	}
 
-	else if(c->out == ToutErr || c->out == TappErr)
+	if(c->out == ToutErr || c->out == TappErr)
 	{
+		close(OUT);
+		dup2(stdout_cpy,OUT);
 		close(ERR);
 		dup2(stderr_cpy,ERR);
 	}
