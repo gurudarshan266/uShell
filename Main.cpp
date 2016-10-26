@@ -21,6 +21,7 @@ extern "C" {
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/resource.h>
 #include "parse.h"
 
 #ifdef __cplusplus
@@ -86,9 +87,80 @@ bool IsBuiltin(char* str, bool extended=false)
 	return false;
 }
 
+bool IsNumber(char* c)
+{
+	int x;
+	return (sscanf(c,"%d",&x)>0);
+}
+
 bool IsSubshellReq(Cmd c)
 {
+	if(!strcmp("nice",c->args[0]))
+	{
+		switch(c->nargs)
+		{
+			case 1:
+				return false;
+				break;
+			case 2:
+				if(IsNumber(c->args[1])) return false;
+				else return true;
+				break;
+
+			default:
+				return true;
+		}
+	}
 	return !(IsBuiltin(c->args[0]) && (c->next==NULL));
+}
+
+void DisplaceArgs(Cmd c, int dispacement)
+{
+	c->nargs -= dispacement;
+	for(int i=0;i<c->nargs;i++)
+	{
+		strcpy(c->args[i],c->args[i+dispacement]);
+	}
+	c->args[c->nargs]=NULL;
+}
+
+void HandleNice(Cmd c)
+{
+	int priority = 4;
+
+	if(getpgrp()==origPgid)
+	{
+		if(c->nargs>2)
+		{
+			cout<<"More arguments in nice"<<endl;
+			return;
+		}
+
+		if(c->nargs == 2)
+			sscanf(c->args[1],"%d",&priority);
+		setpriority(PRIO_PROCESS,0, priority);
+		cout<<"Priority of "<<getpid()<<" set to "<<getpriority(PRIO_PROCESS,0)<<endl;
+	}
+	else
+	{
+		int start_pos = 1;
+		if(c->nargs<2)
+		{
+			cout<<"Less arguments in nice"<<endl;
+			return;
+		}
+		if(IsNumber(c->args[1]))
+		{
+			sscanf(c->args[1],"%d",&priority);
+			start_pos = 2;
+		}
+
+		DisplaceArgs(c, start_pos);
+
+		setpriority(PRIO_PROCESS,0, priority);
+		cout<<"Priority of "<<getpid()<<" set to "<<getpriority(PRIO_PROCESS,0)<<endl;
+	}
+
 }
 
 bool IsJobCtrlCmd(Cmd c)
@@ -360,6 +432,8 @@ bool ExecuteBuiltIn(Cmd c)
     {
     	DumpJobs();
     }
+    else if(!strcmp("nice",c->args[0]))
+    	HandleNice(c);
 
 	//For "fg" command
 /*	if(strcmp(c->args[0],"fg")==0)
@@ -709,6 +783,11 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master
 		signal(SIGTTOU,SIG_DFL);
 
 		AssignPg(getpid(),master);
+
+		if(!strcmp("nice",c->args[0]))
+		{
+			HandleNice(c);
+		}
 
 		if(!strcmp(c->args[0],"where"))
 		{
