@@ -132,21 +132,21 @@ void HandleNice(Cmd c)
 	{
 		if(c->nargs>2)
 		{
-			cout<<"More arguments in nice"<<endl;
+			clog<<"More arguments in nice"<<endl;
 			return;
 		}
 
 		if(c->nargs == 2)
 			sscanf(c->args[1],"%d",&priority);
 		setpriority(PRIO_PROCESS,0, priority);
-		cout<<"Priority of "<<getpid()<<" set to "<<getpriority(PRIO_PROCESS,0)<<endl;
+		clog<<"Priority of "<<getpid()<<" set to "<<getpriority(PRIO_PROCESS,0)<<endl;
 	}
 	else
 	{
 		int start_pos = 1;
 		if(c->nargs<2)
 		{
-			cout<<"Less arguments in nice"<<endl;
+			clog<<"Less arguments in nice"<<endl;
 			return;
 		}
 		if(IsNumber(c->args[1]))
@@ -158,7 +158,7 @@ void HandleNice(Cmd c)
 		DisplaceArgs(c, start_pos);
 
 		setpriority(PRIO_PROCESS,0, priority);
-		cout<<"Priority of "<<getpid()<<" set to "<<getpriority(PRIO_PROCESS,0)<<endl;
+		clog<<"Priority of "<<getpid()<<" set to "<<getpriority(PRIO_PROCESS,0)<<endl;
 	}
 
 }
@@ -304,10 +304,28 @@ void HandleCd(Cmd c)
 
 void HandlePwd(Cmd c)
 {
-	char buff[1024];
+	char buff[1024]="";
+	memset(buff,0,sizeof(buff));
 	getcwd(buff, sizeof(buff));
 	cout<<buff<<endl;
 }
+
+void HandleEcho(Cmd c)
+{
+	char *buff = (char*)calloc(1,1024);
+
+	for(int i = 1; i<c->nargs;i++)
+	{
+//		memcpy(buff + strlen,c->args[0],strlen(c->args[0]));
+		sprintf(buff,"%s",c->args[i]);
+		if(i!=c->nargs-1)
+			sprintf(buff," ");
+	}
+//	cout<<endl;
+	printf("%s\n",buff);
+	free(buff);
+}
+
 
 int stdin_cpy = 0;
 int stdout_cpy = 1;
@@ -397,6 +415,8 @@ void SetupPipes(Cmd c, int* prevPipe, int* nextPipe)
 			dup2(nextPipe[OUT],ERR);
 
 		close(nextPipe[OUT]);
+		fflush(stdout);
+		fflush(stderr);
 	}
 
 	//Setup IO redirection
@@ -447,6 +467,8 @@ bool ExecuteBuiltIn(Cmd c)
     	HandleNice(c);
     else if(strcmp(c->args[0],"pwd")==0)
     	HandlePwd(c);
+    else if(!strcmp(c->args[0],"echo"))
+    	HandleEcho(c);
 
 	//For "fg" command
 /*	if(strcmp(c->args[0],"fg")==0)
@@ -506,12 +528,12 @@ void WaitOnFg()
 			{
 				if(state==Background)
 				{
-					cout<<"Background ";
-					cout<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
+					cerr<<"Background ";
+					cerr<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
 				}
 				else if(WIFSIGNALED(retStat))
 				{
-					cout<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
+					cerr<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
 				}
 //					cout<<"Job["<<j->GetJobID()<<"]\tTerminated"<<endl;
 				j->state = Terminated;
@@ -807,7 +829,7 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master
 		{
 			if(c->nargs < 2 )
 			{
-				cout<<"Missing arguments"<<endl;
+				cerr<<"Missing arguments"<<endl;
 				exit(0);
 			}
 			if(IsBuiltin(c->args[1],true))
@@ -824,7 +846,7 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master
 		else if(IsBuiltin(c->args[0]))
 		{
 			ExecuteBuiltIn(c);
-			cout<<"Executing built-in in sub-shell"<<endl;
+			clog<<"Executing built-in in sub-shell"<<endl;
 		}
 	    else//Run executable
 	    {
@@ -1017,7 +1039,7 @@ void DumpJobs()
 
 int ReadCmdFile(const char* filename)
 {
-	cout<<"Reading file "<<filename<<endl;
+	clog<<"Reading file "<<filename<<endl;
 
 	int fd = open(filename,O_RDONLY);
 
@@ -1076,8 +1098,9 @@ void InitializeBuiltinList()
 	Builtins.push_back("logout");
 	Builtins.push_back("kill");
 	Builtins.push_back("pwd");
+	Builtins.push_back("echo");
 
-	ExtendedBuiltins.push_back("echo");
+//	ExtendedBuiltins.push_back("echo");
 //	ExtendedBuiltins.push_back("pwd");
 	ExtendedBuiltins.push_back("where");
 
