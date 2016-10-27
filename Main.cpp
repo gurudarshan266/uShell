@@ -317,12 +317,14 @@ void HandleEcho(Cmd c)
 	for(int i = 1; i<c->nargs;i++)
 	{
 //		memcpy(buff + strlen,c->args[0],strlen(c->args[0]));
-		sprintf(buff,"%s",c->args[i]);
+//		sprintf(buff,"%s",c->args[i]);
+		printf("%s",c->args[i]);
 		if(i!=c->nargs-1)
-			sprintf(buff," ");
+//			sprintf(buff," ");
+			printf(" ");
 	}
 //	cout<<endl;
-	printf("%s\n",buff);
+	printf("\n");
 	free(buff);
 }
 
