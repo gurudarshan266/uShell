@@ -415,8 +415,6 @@ void SetupPipes(Cmd c, int* prevPipe, int* nextPipe)
 			dup2(nextPipe[OUT],ERR);
 
 		close(nextPipe[OUT]);
-		fflush(stdout);
-		fflush(stderr);
 	}
 
 	//Setup IO redirection
@@ -1108,7 +1106,7 @@ void InitializeBuiltinList()
 
 int main(int argc, char *argv[])
 {
-  logfile.open("err.txt");
+  logfile.open("/dev/null");
 
 
   Pipe p;
