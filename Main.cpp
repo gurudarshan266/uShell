@@ -28,7 +28,7 @@ extern "C" {
 }
 #endif
 
-#define DISP_ERR cout<<strerror(errno)<<endl;
+#define DISP_ERR cout<<"errno = "<<errno<<" "<<strerror(errno)<<endl;
 #define IN 0
 #define OUT 1
 #define ERR 2
@@ -302,13 +302,21 @@ void HandleCd(Cmd c)
 		cout<<strerror(errno)<<endl;
 }
 
+void HandlePwd(Cmd c)
+{
+	char buff[1024];
+	getcwd(buff, sizeof(buff));
+	cout<<buff<<endl;
+}
+
+int stdin_cpy = 0;
 int stdout_cpy = 1;
 int stderr_cpy = 2;
 void ManageIO(Cmd c)
 {
 	int fd[2];
 
-	if(c->in == Tin && getpgrp()!=origPgid)//If input from a file
+	if(c->in == Tin && !(getpgrp()==origPgid))//If input from a file
 	{
 		fd[IN] = open(c->infile,O_RDONLY);
 		if(fd[IN] < 0)
@@ -316,6 +324,9 @@ void ManageIO(Cmd c)
 			DISP_ERR
 			exit(-1);
 		}
+
+		if(getpgrp()==origPgid)
+			stdin_cpy = dup(STDIN_FILENO);
 
 		dup2(fd[IN], IN);//Make the new fd, the stdin for this process
 	}
@@ -434,6 +445,8 @@ bool ExecuteBuiltIn(Cmd c)
     }
     else if(!strcmp("nice",c->args[0]))
     	HandleNice(c);
+    else if(strcmp(c->args[0],"pwd")==0)
+    	HandlePwd(c);
 
 	//For "fg" command
 /*	if(strcmp(c->args[0],"fg")==0)
@@ -485,7 +498,7 @@ void WaitOnFg()
 		{
 			j->UpdateProcState(pp, Dead);
 
-			clog<<"EXITED PID = "<<pp<<" JobID = "<<j->GetJobID()<<" status = "<<retStat<<endl;
+			clog<<"EXITED PID = "<<pp<<" JobID = "<<j->GetJobID()<<" status = "<<retStat<<" signaled = "<<WIFSIGNALED(retStat)<<endl;
 
 			State state = j->state;
 
@@ -781,6 +794,7 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master
 		signal(SIGINT, SIG_DFL);
 		signal(SIGTSTP,SIG_DFL);
 		signal(SIGTTOU,SIG_DFL);
+		signal(SIGQUIT,SIG_DFL);
 
 		AssignPg(getpid(),master);
 
@@ -815,9 +829,13 @@ void HandleExecutable(Cmd c, int* prevPipe,int* nextPipe,Job* job, pid_t& master
 	    else//Run executable
 	    {
 			int res = execvp(c->args[0],c->args);
-			cerr<<c->args[0]<<": command not found"<<endl;
+//			DISP_ERR;
+			if(errno==EACCES)
+				cerr<<"permission denied"<<endl;
+			else if(errno==ENOENT)
+				cerr<<c->args[0]<<": command not found"<<endl;
 			kill(-getpgrp(),SIGKILL);
-			exit(-1);
+			exit(0);
 	    }
 
 		exit(0);
@@ -903,6 +921,7 @@ void RegisterSigHandlers()
 	signal(SIGTTOU, SIG_IGN);
 	signal(SIGTSTP,SIG_IGN);
 	signal(SIGINT,SIG_IGN);
+	signal(SIGQUIT,SIG_IGN);
 }
 
 void DetachTerminal()
@@ -1056,9 +1075,10 @@ void InitializeBuiltinList()
 	Builtins.push_back("cd");
 	Builtins.push_back("logout");
 	Builtins.push_back("kill");
+	Builtins.push_back("pwd");
 
 	ExtendedBuiltins.push_back("echo");
-	ExtendedBuiltins.push_back("pwd");
+//	ExtendedBuiltins.push_back("pwd");
 	ExtendedBuiltins.push_back("where");
 
 }
@@ -1088,7 +1108,8 @@ int main(int argc, char *argv[])
   while ( 1 ) {
 	getcwd(cwd, sizeof(cwd));
 	CheckBgJobsStatus();
-	printf("%s: "ANSI_COLOR_CYAN"%s "ANSI_COLOR_RESET"%% ", host, cwd);
+//	printf("%s: "ANSI_COLOR_CYAN"%s "ANSI_COLOR_RESET"%% ", host, cwd);
+	printf("%s%% ",host);
 	fflush( stdout );
 	p = parse();
 	while(p != NULL)
