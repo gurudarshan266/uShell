@@ -354,7 +354,7 @@ void ManageIO(Cmd c)
 		int flags= O_WRONLY | O_CREAT;
 		flags |= ( (c->out==Tapp || c->out==TappErr)? O_APPEND : O_TRUNC );
 
-		int mode = S_IRUSR | S_IWUSR;
+		int mode = 0666;
 
 		fd[OUT] = open(c->outfile,flags, mode);
 

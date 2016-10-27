@@ -3,3 +3,6 @@ all:
 
 clean:
 	rm ush
+
+tar:
+	 tar -zcvf gpollep.tar.gz Main.cpp Job.cpp Job.h Makefile parse.h parse.c EXTRA_CREDIT
