@@ -1,0 +1,2 @@
+# uShell
+Micro shell is a complete overhaul of the existing Unix C-Shell with advanced Job control mechanisms. The micro-shell was designed from scratch and exhibits all the features available in C-Shell but does not use any of the code from its predecessor. Signal handling, IO Redirection, Pipes and Job Control (fg, bg, kill) are few features. An experimental feature was added to the shell using which a new job can be attached to an ongoing background job thus extending the pipeline of the older job to accommodate the new job.
